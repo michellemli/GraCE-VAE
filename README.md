@@ -2,6 +2,8 @@
 
 **Authors:** Jifan Zhang*, Michelle M. Li*, Elena Zheleva
 
+**Paper:** [https://doi.org/10.1145/3770855.3819023](https://doi.org/10.1145/3770855.3819023)
+
 ## Overview
 
 Causal disentanglement from soft interventions is identifiable under the assumptions of linear interventional faithfulness and availability of both observational and interventional data. Prior work has focused on unstructured observations without leveraging known relational context among measured entities. In many scientific applications, however, the measured variables come with an observed interaction network that provides structured context, such as protein-protein interactions and pathway-gene membership. We propose GraCE-VAE, a graph-aware causal discrepancy variational autoencoder that treats pathway-level information as an auxiliary view of the latent causal programs. The graph neural network encoder conditions on this auxiliary pathway view and the biological graph to improve amortized inference, while the causal decoder remains a latent SCM with soft interventions. Assuming samples are i.i.d. within each intervention regime, we show that GraCE-VAE inherits the identifiability guarantees of causal discrepancy VAEs and identifies the latent causal graph and intervention targets up to the standard equivalence class. Experiments on three CRISPR perturbation datasets demonstrate that leveraging structured biological context improves prediction of interventional outcomes, including unseen perturbation combinations.
