@@ -13,7 +13,7 @@ def _to_numpy_row(matrix_row):
 
 
 def _load_aligned_obsm_embeddings(
-    norman_adata,
+    adata,
     embedding_h5ad,
     embedding_obsm_key,
     embedding_align_mode='auto',
@@ -25,16 +25,16 @@ def _load_aligned_obsm_embeddings(
             f"Available keys: {list(emb_adata.obsm.keys())}"
         )
 
-    if len(emb_adata.obs_names) != len(norman_adata.obs_names):
+    if len(emb_adata.obs_names) != len(adata.obs_names):
         raise ValueError(
             "Embedding adata and Norman adata have different numbers of cells: "
-            f"{len(emb_adata.obs_names)} vs {len(norman_adata.obs_names)}"
+            f"{len(emb_adata.obs_names)} vs {len(adata.obs_names)}"
         )
 
-    norman_obs = np.asarray(norman_adata.obs_names)
+    adata_obs = np.asarray(adata.obs_names)
     embedding_obs = np.asarray(emb_adata.obs_names)
 
-    if np.array_equal(embedding_obs, norman_obs):
+    if np.array_equal(embedding_obs, adata_obs):
         emb_matrix = np.asarray(emb_adata.obsm[embedding_obsm_key], dtype=np.float32)
         return emb_matrix
 
@@ -44,8 +44,8 @@ def _load_aligned_obsm_embeddings(
 
     if embedding_align_mode == 'auto':
         emb_index = {name: i for i, name in enumerate(emb_adata.obs_names)}
-        if all(name in emb_index for name in norman_obs):
-            order = np.array([emb_index[name] for name in norman_obs], dtype=np.int64)
+        if all(name in emb_index for name in adata_obs):
+            order = np.array([emb_index[name] for name in adata_obs], dtype=np.int64)
             emb_matrix = np.asarray(emb_adata.obsm[embedding_obsm_key][order], dtype=np.float32)
             return emb_matrix
 
@@ -62,7 +62,7 @@ def _load_aligned_obsm_embeddings(
     return emb_matrix
 
 
-# read the norman dataset.
+# read the single cell perturbation dataset.
 # map the target genes of each cell to a binary vector, using a target gene list "perturb_targets".
 # "perturb_type" specifies whether the returned object contains single trarget-gene samples, double target-gene samples, or both.
 class SCDataset(Dataset):
@@ -160,16 +160,16 @@ class SCDataset(Dataset):
         if self.embedding_h5ad is None or self.rand_ctrl_embeddings is not None:
             return
 
-        norman_adata = sc.read_h5ad(self.datafile)
+        adata = sc.read_h5ad(self.datafile)
         full_embeddings = _load_aligned_obsm_embeddings(
-            norman_adata,
+            adata,
             self.embedding_h5ad,
             self.embedding_obsm_key,
             embedding_align_mode=self.embedding_align_mode,
         )
         self.embedding_dim = int(full_embeddings.shape[1])
         self.rand_ctrl_embeddings = full_embeddings[self.rand_ctrl_orig_indices]
-        del norman_adata
+        del adata
 
     def __getstate__(self):
         state = self.__dict__.copy()
