@@ -2,39 +2,97 @@
 
 **Authors:** Jifan Zhang*, Michelle M. Li*, Elena Zheleva
 
-**Paper:** [https://doi.org/10.1145/3770855.3819023](https://doi.org/10.1145/3770855.3819023)
+**Paper:** [Causal Representation Learning from Network Data](https://doi.org/10.1145/3770855.3819023)
 
 ## Overview
 
-Causal disentanglement from soft interventions is identifiable under the assumptions of linear interventional faithfulness and availability of both observational and interventional data. Prior work has focused on unstructured observations without leveraging known relational context among measured entities. In many scientific applications, however, the measured variables come with an observed interaction network that provides structured context, such as protein-protein interactions and pathway-gene membership. We propose GraCE-VAE, a graph-aware causal discrepancy variational autoencoder that treats pathway-level information as an auxiliary view of the latent causal programs. The graph neural network encoder conditions on this auxiliary pathway view and the biological graph to improve amortized inference, while the causal decoder remains a latent SCM with soft interventions. Assuming samples are i.i.d. within each intervention regime, we show that GraCE-VAE inherits the identifiability guarantees of causal discrepancy VAEs and identifies the latent causal graph and intervention targets up to the standard equivalence class. Experiments on three CRISPR perturbation datasets demonstrate that leveraging structured biological context improves prediction of interventional outcomes, including unseen perturbation combinations.
+GraCE-VAE is a graph-aware causal discrepancy variational autoencoder for predicting single-cell responses to unseen interventions. This repository contains the Norman CRISPR dataset implementation used in the paper. Pathway nodes provide auxiliary context in the GNN encoder; the causal decoder remains a latent structural causal model.
 
-## Installation and Setup
+## Included Models
 
-### :one: Download the Repo
+| CLI name | Paper model |
+| --- | --- |
+| `cmvaegnn` | GraCE-VAE |
+| `cmvae` | CMVAE |
+| `cmvaeonehot` | CMVAE-multihot |
+| `cgvae` | VGAE |
 
-First, clone the GitHub repository:
+The SENA baseline uses its separate upstream implementation and is not duplicated here. Experimental model variants that are not reported in the paper have been removed.
 
-```
-git clone https://github.com/michellemli/GraCE-VAE
+## Setup
+
+```bash
+git clone https://github.com/michellemli/GraCE-VAE.git
 cd GraCE-VAE
-```
-
-### :two: Set Up Environment
-
-This codebase leverages Python, PyTorch, PyTorch Geometric, etc. To create an environment with all of the required packages, please ensure that [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html) is installed and then execute the commands:
-
-```
 conda env create -f environment.yml
 conda activate GraCE_env
 ```
 
-## Cite
+Place the Norman dataset at:
 
+```text
+data/Norman2019_raw.h5ad
 ```
-@article{zhang2026gracevae,
+
+The loader expects `adata.obs['guide_ids']`, `adata.var.gene_symbols`, and the differential-expression results in `adata.uns['rank_genes_groups']`. The Reactome and gene-network files required by the graph encoder are included under `networks/`.
+
+## Main Experiment
+
+```bash
+python -W ignore src/run.py \
+  --model cmvaegnn \
+  --device cuda:0 \
+  --mode 15 \
+  --randomseed 1 \
+  --mxAlpha 8 \
+  --mxBeta 2 \
+  --mxTemp 4 \
+  --lmbda 0.0001
+```
+
+`bash run.sh` runs this configuration for seeds 1 through 10.
+
+## Reported Ablations
+
+The retained `--mode` values reproduce the graph-context and GNN architecture variants used in the paper:
+
+| Mode | Encoder graph / architecture |
+| --- | --- |
+| `3` | Gene-gene graph |
+| `4` | Gene-gene and gene-pathway graph |
+| `6` | Gene-gene, gene-pathway, and pathway-pathway graph over involved pathways |
+| `5` | Full biological graph with one-layer GCN |
+| `11` | Full biological graph with one-layer GAT |
+| `13` | Full biological graph with three-layer GAT |
+| `15` | Full biological graph with one-layer GraphSAGE (main model) |
+
+Use the 50% edge-corruption experiment with:
+
+```bash
+python -W ignore src/run.py --model cmvaegnn --device cuda:0 --mode 15 --randomseed 1 --halfmixededge True
+```
+
+The reported graph-guided intervention encoders are selected with `--graphencoder True` and one of:
+
+```text
+--interv_encoder_type v1_trivalue
+--interv_encoder_type v1_trivalue_subgraph1hop
+--interv_encoder_type v2_dropedge
+```
+
+For the scFM feature experiment, pass an aligned `.h5ad` file through `--embedding_h5ad`; its cell embeddings are read from `obsm['embeddings']` by default. CMVAE-multihot retains the legacy preprocessing helper in `src/multihot.py` and expects precomputed 2,694-dimensional pathway features.
+
+## Other Datasets
+
+The other datasets in the paper are not path-only replacements. Reusing this code requires dataset-specific adapters for perturbation labels, train/validation/test splits, gene identifiers, feature dimensions, and compatible biological networks.
+
+## Citation
+
+```bibtex
+@inproceedings{zhang2026gracevae,
   title={Causal Representation Learning from Network Data},
-  author={Zhang, Jifan and Li, Michelle M and Zheleva, Elena},
-  journal={KDD},
+  author={Zhang, Jifan and Li, Michelle M. and Zheleva, Elena},
+  booktitle={Proceedings of the ACM SIGKDD Conference on Knowledge Discovery and Data Mining},
   year={2026}
 }
 ```

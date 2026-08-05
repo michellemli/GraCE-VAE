@@ -5,15 +5,12 @@ import wandb
 from copy import deepcopy
 import numpy as np
 import os
-import pickle
-from dataset import SCDataset
-from model import CMVAEGNN, CVAE, MVAE, CMVAE_simu,CMVAE,CMVAEonehot,CGVAE,GRACE
-from utils import MMD_loss
-from edgeindex import getedge_index_GGGP,getedge_index_all,getedge_index_GG,getedge_index_all_pathway,getedge_index_GP,random_index_all_pathway,allconnected_index_GG,build_gene_union_graph,mixed_half_correct_half_random_index_all_pathway
+from model import CMVAEGNN, CMVAE, CMVAEonehot, CGVAE, GRACE
+from edgeindex import getedge_index_GGGP,getedge_index_all,getedge_index_GG,getedge_index_all_pathway,build_gene_union_graph,mixed_half_correct_half_random_index_all_pathway
 import scanpy as sc
 from sklearn.metrics import r2_score
-from inference import *
-from utils import SCDATA_sampler, MMD_loss, laplacian_smoothness
+from inference import evaluate_generated_samples, evaluate_single_leftout, evaluate_double
+from utils import MMD_loss, laplacian_smoothness
 
 import project_config
 
@@ -32,31 +29,17 @@ dataloader,val_dataloader,ptb_targets,
     savedir,datadir,
     mode,
     log,
-    simu=False,
-    order=None,
-    nonlinear=False,
     ):
     
     if log:
         wandb.init(project='cmvae', name=savedir.split('/')[-1])  
 
-    if simu:
-        cmvae = CMVAE_simu(
-            dim = opts.dim,
-            z_dim = opts.latdim,
-            c_dim = opts.cdim,
-            nonlinear=nonlinear,
-            order=order,
-            device = device
-        ) 
-    else:      
-        cmvae = CMVAE(
-            dim = opts.dim,
-            z_dim = opts.latdim,
-            c_dim = opts.cdim,
-            
-            device = device
-        )#add p_dim for CMVAEGNN
+    cmvae = CMVAE(
+        dim = opts.dim,
+        z_dim = opts.latdim,
+        c_dim = opts.cdim,
+        device = device
+    )
     cmvae.double()
     cmvae.to(device)
 
@@ -129,11 +112,7 @@ dataloader,val_dataloader,ptb_targets,
                 wandb.log({'recon_loss':recon_loss})
                 wandb.log({'kl_loss':kl_loss})
 
-        if simu:
-            if n % 10 == 0:
-                print('Epoch '+str(n)+': Loss='+str(lossAv/ct)+', '+'MMD='+str(mmdAv/ct)+', '+'MSE='+str(reconAv/ct)+', '+'KL='+str(klAv/ct)+','+'L1='+str(L1Av/ct))
-        else:
-            print('Epoch '+str(n)+': Loss='+str(lossAv/ct)+', '+'MMD='+str(mmdAv/ct)+', '+'MSE='+str(reconAv/ct)+', '+'KL='+str(klAv/ct))
+        print('Epoch '+str(n)+': Loss='+str(lossAv/ct)+', '+'MMD='+str(mmdAv/ct)+', '+'MSE='+str(reconAv/ct)+', '+'KL='+str(klAv/ct))
         
         if log:
             wandb.log({'epoch avg loss': lossAv/ct})
@@ -223,209 +202,6 @@ dataloader,val_dataloader,ptb_targets,
     last_model = deepcopy(cmvae)
     torch.save(last_model, os.path.join(savedir, 'last_model.pt'))
     print("model saved!")
-# fit CVAE baseline to data
-def train_CVAE(
-    dataloader,
-    opts,
-    device,
-    savedir,
-    log
-    ):
-
-    if log:
-        wandb.init(project='cmvae', name=savedir.split('/')[-1])  
-
-    cvae = CVAE(
-        dim = opts.dim,
-        z_dim = opts.latdim,
-        c_dim = opts.cdim,
-        device = device
-    )
-    cvae.double()
-    cvae.to(device)
-
-    optimizer = torch.optim.Adam(params=cvae.parameters(), lr=opts.lr)
-
-    cvae.train()
-    print("Training for {} epochs...".format(str(opts.epochs)))
-
-    ## Loss parameters
-    beta_schedule = torch.zeros(opts.epochs) # weight on the KLD
-    beta_schedule[:10] = 0
-    beta_schedule[10:] = torch.linspace(0,opts.mxBeta,opts.epochs-10) 
-    alpha_schedule = torch.zeros(opts.epochs) # weight on the MMD
-    alpha_schedule[:] = opts.mxAlpha
-    alpha_schedule[:5] = 0
-    alpha_schedule[5:int(opts.epochs/2)] = torch.linspace(0,opts.mxAlpha,int(opts.epochs/2)-5) 
-    alpha_schedule[int(opts.epochs/2):] = opts.mxAlpha
-
-    ## Softmax temperature 
-    temp_schedule = torch.ones(opts.epochs)
-    temp_schedule[5:] = torch.linspace(1, opts.mxTemp, opts.epochs-5)
-
-    min_train_loss = np.inf
-    best_model = deepcopy(cvae)
-    for n in range(0, opts.epochs):
-        lossAv = 0
-        ct = 0
-        reconAv = 0
-        i_reconAv = 0
-        klAv = 0
-        for (i, X) in tqdm(enumerate(dataloader)):
-            x = X[0]
-            y = X[1]
-            c = X[2]
-            
-            if cvae.cuda:
-                x = x.to(device)
-                y = y.to(device)
-                c = c.to(device)
-                
-            optimizer.zero_grad()
-
-            y_recon, z_mu, z_var, G = cvae(y, c, c, num_interv=torch.sum(c[0]), temp=temp_schedule[n])
-            _, i_recon_loss, kl_loss, L1 = loss_function(None, None, y_recon, y, z_mu, z_var, G, opts.MMD_sigma, opts.kernel_num, opts.matched_IO)
-            loss = alpha_schedule[n]*i_recon_loss + beta_schedule[n]*kl_loss/2 + opts.lmbda*L1/2
-
-            x_recon, z_mu, z_var, G = cvae(x, None, None, 0, temp=temp_schedule[n])
-            _, recon_loss, kl_loss, L1 = loss_function(None, None, x_recon, x, z_mu, z_var, G, opts.MMD_sigma, opts.kernel_num, opts.matched_IO)
-            loss += recon_loss + beta_schedule[n]*kl_loss/2 + opts.lmbda*L1/2
-            
-            loss.backward()
-            if opts.grad_clip:
-                for param in cvae.parameters():
-                    if param.grad is not None:
-                        param.grad.data = param.grad.data.clamp(min=-0.5, max=0.5)
-            optimizer.step()
-
-            ct += 1
-            lossAv += loss.detach().cpu().numpy()
-            i_reconAv += i_recon_loss.detach().cpu().numpy()
-            reconAv += recon_loss.detach().cpu().numpy()
-            klAv += kl_loss.detach().cpu().numpy()
-
-            if log:
-                wandb.log({'loss':loss})
-                wandb.log({'i_recon_loss':i_recon_loss})
-                wandb.log({'recon_loss':recon_loss})
-                wandb.log({'kl_loss':kl_loss})
-
-        print('Epoch '+str(n)+': Loss='+str(lossAv/ct)+', '+'I_MSE='+str(i_reconAv/ct )+', '+'MSE='+str(reconAv/ct)+', '+'KL='+str(klAv/ct))
-        
-        if log:
-            wandb.log({'epoch avg loss': lossAv/ct})
-            wandb.log({'epoch avg i_recon_loss': i_reconAv/ct})
-            wandb.log({'epoch avg recon_loss': reconAv/ct})
-            wandb.log({'epoch avg kl_loss': klAv/ct})
-
-        if (i_reconAv+reconAv + klAv)/ct < min_train_loss:
-            min_train_loss = (i_reconAv + reconAv + klAv)/ct 
-            best_model = deepcopy(cvae)
-            torch.save(best_model, os.path.join(savedir, 'best_model.pt'))
-
-    last_model = deepcopy(cvae)
-    torch.save(last_model, os.path.join(savedir, 'last_model.pt'))
-
-
-# fit MVAE to data
-def train_MVAE(
-    dataloader,
-    opts,
-    device,
-    savedir,
-    log
-    ):
-
-    if log:
-        wandb.init(project='cmvae', name=savedir.split('/')[-1])  
-
-    mvae = MVAE(
-        dim = opts.dim,
-        z_dim = opts.latdim,
-        c_dim = opts.cdim,
-        device = device
-    )
-    mvae.double()
-    mvae.to(device)
-
-    optimizer = torch.optim.Adam(params=mvae.parameters(), lr=opts.lr)
-
-    mvae.train()
-    print("Training for {} epochs...".format(str(opts.epochs)))
-
-    ## Loss parameters
-    beta_schedule = torch.zeros(opts.epochs) # weight on the KLD
-    beta_schedule[:10] = 0
-    beta_schedule[10:] = torch.linspace(0,opts.mxBeta,opts.epochs-10) 
-    alpha_schedule = torch.zeros(opts.epochs) # weight on the MMD
-    alpha_schedule[:] = opts.mxAlpha
-    alpha_schedule[:5] = 0
-    alpha_schedule[5:int(opts.epochs/2)] = torch.linspace(0,opts.mxAlpha,int(opts.epochs/2)-5) 
-    alpha_schedule[int(opts.epochs/2):] = opts.mxAlpha
-
-    ## Softmax temperature 
-    temp_schedule = torch.ones(opts.epochs)
-    temp_schedule[5:] = torch.linspace(1, opts.mxTemp, opts.epochs-5)
-
-    min_train_loss = np.inf
-    best_model = deepcopy(mvae)
-    for n in range(0, opts.epochs):
-        lossAv = 0
-        ct = 0
-        mmdAv = 0
-        reconAv = 0
-        klAv = 0
-        for (i, X) in tqdm(enumerate(dataloader)):
-            x = X[0]
-            y = X[1]
-            c = X[2]
-            
-            if mvae.cuda:
-                x = x.to(device)
-                y = y.to(device)
-                c = c.to(device)
-                
-            optimizer.zero_grad()
-            y_hat, x_recon, z_mu, z_var = mvae(x, c, c, num_interv=1, temp=temp_schedule[n])
-            mmd_loss, recon_loss, kl_loss, _ = loss_function(y_hat, y, x_recon, x, z_mu, z_var, None, opts.MMD_sigma, opts.kernel_num, opts.matched_IO)
-            loss = alpha_schedule[n] * mmd_loss + recon_loss + beta_schedule[n]*kl_loss
-            loss.backward()
-            if opts.grad_clip:
-                for param in mvae.parameters():
-                    if param.grad is not None:
-                        param.grad.data = param.grad.data.clamp(min=-0.5, max=0.5)
-            optimizer.step()
-
-            ct += 1
-            lossAv += loss.detach().cpu().numpy()
-            mmdAv += mmd_loss.detach().cpu().numpy()
-            reconAv += recon_loss.detach().cpu().numpy()
-            klAv += kl_loss.detach().cpu().numpy()
-
-            if log:
-                wandb.log({'loss':loss})
-                wandb.log({'mmd_loss':mmd_loss})
-                wandb.log({'recon_loss':recon_loss})
-                wandb.log({'kl_loss':kl_loss})
-
-        print('Epoch '+str(n)+': Loss='+str(lossAv/ct)+', '+'MMD='+str(mmdAv/ct)+', '+'MSE='+str(reconAv/ct)+', '+'KL='+str(klAv/ct))
-        
-        if log:
-            wandb.log({'epoch avg loss': lossAv/ct})
-            wandb.log({'epoch avg mmd_loss': mmdAv/ct})
-            wandb.log({'epoch avg recon_loss': reconAv/ct})
-            wandb.log({'epoch avg kl_loss': klAv/ct})
-
-        if (mmdAv + reconAv + klAv)/ct < min_train_loss:
-            min_train_loss = (mmdAv + reconAv + klAv)/ct 
-            best_model = deepcopy(mvae)
-            torch.save(best_model, os.path.join(savedir, 'best_model.pt'))
-    
-    last_model = deepcopy(mvae)
-    torch.save(last_model, os.path.join(savedir, 'last_model.pt'))
-
-
-
 # loss function definition
 def loss_function(y_hat, y, x_recon, x, mu, var, G, MMD_sigma, kernel_num, matched_IO=False):
 
@@ -448,15 +224,8 @@ def loss_function(y_hat, y, x_recon, x, mu, var, G, MMD_sigma, kernel_num, match
     else:
         L1 = torch.norm(torch.triu(G,diagonal=1),1)  # L1 norm for sparse G
     return MMD, MSE, KLD, L1
-def set_distill_mode(model, mode_str: str):
-    """Set distill encoder output mode if available."""
-    enc = getattr(model, "graph_c_encoder", None)
-    if enc is None:
-        return False
-    if hasattr(enc, "output_mode"):
-        enc.output_mode = mode_str
-        return True
-    return False
+
+
 #fit GNN to data
 def train_GNN(
     dataloader, val_dataloader,ptb_targets,
@@ -466,15 +235,9 @@ def train_GNN(
     mode,
     log,
     remove=False,
-    graphencoder=False,     #True: 用graph-guided c_encode；False: 用原版
-    randomedge=False,
+    graphencoder=False,
     halfmixededge=False,
-    # ---- new: which intervention encoder to use inside GRACE ----
-    interv_encoder_type=None,
-    distill_weight: float = 0.0,
-    distill_output_mode: str = "mix",
-    order=None,
-    nonlinear=False):
+    interv_encoder_type=None):
     
     if log:
         wandb.init(project='cmvae', name=savedir.split('/')[-1])  
@@ -514,7 +277,6 @@ def train_GNN(
             gnn_hidden=64,
             readout="target",
             interv_encoder_type=interv_encoder_type,
-            distill_output_mode=distill_output_mode,
         )
     else:      
         cmvae = CMVAEGNN(
@@ -575,9 +337,6 @@ def train_GNN(
     else:
         if halfmixededge:
             edgeindex=mixed_half_correct_half_random_index_all_pathway(device,genes_A,seed=opts.seed)
-        elif randomedge:
-            edgeindex=random_index_all_pathway(device,genes_A,seed=opts.seed)
-            
         else:
             edgeindex=getedge_index_all_pathway(device,genes_A)
             if mode==3:
@@ -588,17 +347,6 @@ def train_GNN(
                 edgeindex=getedge_index_all(device,genes_A)
     print("the size of egde in GNN is {}".format(edgeindex.shape[1]/2))
     onehot=0#torch.load(f'./alldata/seed{opts.seed}/multi-hot-train-allpathways')
-    t1 = int(0.1 * opts.epochs)
-    t2 = int(0.7 * opts.epochs)
-    distill_weight_schedule = torch.zeros(opts.epochs)
-
-
-    w1 = float(distill_weight)          # e.g., 0.1 (前期)
-    w2 = float(distill_weight) * 0.5    # e.g., 0.05 (中期)
-    w3 = float(distill_weight) * 0.1    # e.g., 0.01 (后期)
-    distill_weight_schedule[:t1] = w1
-    distill_weight_schedule[t1:t2] = w2
-    distill_weight_schedule[t2:] = w3
     ggindex=getedge_index_GG(device,genes_A)
     for n in range(0, opts.epochs):
         lossAv = 0
@@ -607,19 +355,6 @@ def train_GNN(
         reconAv = 0
         klAv = 0
         L1Av = 0
-        if n < t1:
-            cur_mode = "teacher"
-        elif n < t2:
-            cur_mode = "mix"
-        else:
-            cur_mode = "mix"
-
-# 只对 distill enc 生效（如果不是 distill encoder，这行什么也不做）
-        if graphencoder and (interv_encoder_type in ["v2_dropedge_distill", "v1_trivalue_distill"]):
-            set_distill_mode(cmvae, cur_mode)
-
-            if log:
-                    wandb.log({"distill_output_mode": {"teacher":0, "mix":1, "student":2}[cur_mode]}, commit=False)
         for (i, X) in enumerate(dataloader):
             x = X[0]#observation samples
             y = X[1]#interventional samples
@@ -634,7 +369,7 @@ def train_GNN(
                 if isinstance(dx, torch.Tensor):
                     dx = dx.to(device)
             optimizer.zero_grad()
-            if graphencoder or remove:
+            if graphencoder:
                 y_hat, x_recon, z_mu, z_var, G,bc,csz,bc2,csz2 = cmvae(x,dx,c, c, edgeindex,mode,num_interv=1, temp=temp_schedule[n])
             else:
                 y_hat, x_recon, z_mu, z_var, G = cmvae(x,dx,c, c, edgeindex,mode,num_interv=1, temp=temp_schedule[n])
@@ -649,11 +384,6 @@ def train_GNN(
             else:
                 loss = alpha_schedule[n] * mmd_loss + recon_loss + beta_schedule[n]*kl_loss + opts.lmbda*L1
 
-            # Optional: add distillation/aux loss from the causal intervention encoder
-            # (Only active when using v2_dropedge_distill and distill_weight>0)
-            dw = float(distill_weight_schedule[n].item())
-            if graphencoder and dw > 0 and (getattr(cmvae, "c_encoder_aux_loss", None) is not None):
-                loss = loss + dw * cmvae.c_encoder_aux_loss
             loss.backward()
             if opts.grad_clip:
                 for param in cmvae.parameters():
@@ -673,9 +403,6 @@ def train_GNN(
                 wandb.log({'mmd_loss':mmd_loss})
                 wandb.log({'recon_loss':recon_loss})
                 wandb.log({'kl_loss':kl_loss})
-                if graphencoder and distill_weight and (getattr(cmvae, "c_encoder_aux_loss", None) is not None):
-                    auxloss=cmvae.c_encoder_aux_loss
-                    wandb.log({'aux_loss':auxloss.detach().cpu().numpy()})
 
         
 
@@ -686,6 +413,7 @@ def train_GNN(
             wandb.log({'epoch avg mmd_loss': mmdAv/ct})
             wandb.log({'epoch avg recon_loss': reconAv/ct})
             wandb.log({'epoch avg kl_loss': klAv/ct})
+        if log and graphencoder:
             with torch.no_grad():
                 bc_ = bc.detach()
                 eta_ = csz.detach()
@@ -716,12 +444,10 @@ def train_GNN(
     # Final validation loss calculation
     loss_fn = MMD_loss(fix_sigma=1000, kernel_num=10).cuda()
     adata=sc.read_h5ad(project_config.SCDATA)
-    if graphencoder and (interv_encoder_type in ["v2_dropedge_distill", "v1_trivalue_distill"]):
-        set_distill_mode(cmvae, "student")
     cmvae.eval()
     
     print("start hyper parameter finetune on the validation  data-set")
-    rmse, signerr, gt_y, pred_y, c_y, gt_x = evaluate_generated_samples(cmvae,val_dataloader,device,temp=1,modelnumber=mode,numint=1,mode="cmvaegnn", randomedge=randomedge, halfmixededge=halfmixededge, seed=opts.seed) 
+    rmse, signerr, gt_y, pred_y, c_y, gt_x = evaluate_generated_samples(cmvae,val_dataloader,device,temp=1,modelnumber=mode,numint=1,mode="cmvaegnn", halfmixededge=halfmixededge, seed=opts.seed)
     metric={}
     C_y = [','.join([str(l) for l in np.where(c_y[i] != 0)[0]]) for i in range(c_y.shape[0])]
     
@@ -797,31 +523,18 @@ def train_onehot(
     savedir,datadir,
     mode,
     log,
-    simu=False,
-    order=None,
-    nonlinear=False,
     ):
     
     if log:
         wandb.init(project='cmvae', name=savedir.split('/')[-1])  
 
-    if simu:
-        cmvae = CMVAE_simu(
-            dim = opts.dim,
-            z_dim = opts.latdim,
-            c_dim = opts.cdim,
-            nonlinear=nonlinear,
-            order=order,
-            device = device
-        ) 
-    else:      
-        cmvae = CMVAEonehot(
-            dim = opts.dim,
-            z_dim = opts.latdim,
-            c_dim = opts.cdim,
-            device = device,
-            p_dim=opts.pdim
-        )#add p_dim for CMVAEGNN
+    cmvae = CMVAEonehot(
+        dim = opts.dim,
+        z_dim = opts.latdim,
+        c_dim = opts.cdim,
+        device = device,
+        p_dim=opts.pdim
+    )
     cmvae.double()
     cmvae.to(device)
 
@@ -912,11 +625,7 @@ def train_onehot(
                 wandb.log({'recon_loss':recon_loss})
                 wandb.log({'kl_loss':kl_loss})
 
-        if simu:
-            if n % 10 == 0:
-                print('Epoch '+str(n)+': Loss='+str(lossAv/ct)+', '+'MMD='+str(mmdAv/ct)+', '+'MSE='+str(reconAv/ct)+', '+'KL='+str(klAv/ct)+','+'L1='+str(L1Av/ct))
-        else:
-            print('Epoch '+str(n)+': Loss='+str(lossAv/ct)+', '+'MMD='+str(mmdAv/ct)+', '+'MSE='+str(reconAv/ct)+', '+'KL='+str(klAv/ct))
+        print('Epoch '+str(n)+': Loss='+str(lossAv/ct)+', '+'MMD='+str(mmdAv/ct)+', '+'MSE='+str(reconAv/ct)+', '+'KL='+str(klAv/ct))
         
         if log:
             wandb.log({'epoch avg loss': lossAv/ct})
@@ -1017,7 +726,6 @@ def test_model(
     batch_size=32,
     modelnumber=0,
     seed=0,
-    randomedge=False,
     halfmixededge=False,
     embedding_h5ad=None,
     embedding_obsm_key='embeddings',
@@ -1046,7 +754,7 @@ def test_model(
     model.eval()
     # Step 1: Single Evaluation
     print("Evaluating single...")
-    rmse, signerr, gt_y, pred_y, c_y, gt_x = evaluate_single_leftout(model, datadir, model.device, mode,modelnumber, randomedge=randomedge, halfmixededge=halfmixededge, seed=seed)
+    rmse, signerr, gt_y, pred_y, c_y, gt_x = evaluate_single_leftout(model, datadir, model.device, mode,modelnumber, halfmixededge=halfmixededge, seed=seed)
     C_y = [','.join([str(l) for l in np.where(c_y[i] != 0)[0]]) for i in range(c_y.shape[0])]
     
     # Initialize lists for key metrics
@@ -1093,7 +801,6 @@ def test_model(
         model.device,
         mode,
         modelnumber,
-        randomedge=randomedge,
         halfmixededge=halfmixededge,
         seed=seed,
         embedding_h5ad=embedding_h5ad,
@@ -1170,4 +877,3 @@ def test_model(
         for key, value in metrics.items():
             file.write(f"{key}: {value}\n")
     return metrics
-

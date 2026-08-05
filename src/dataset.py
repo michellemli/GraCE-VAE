@@ -1,9 +1,9 @@
-import pickle
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 import scanpy as sc
 import scipy.sparse as sp
+import project_config
 
 
 def _to_numpy_row(matrix_row):
@@ -68,7 +68,7 @@ def _load_aligned_obsm_embeddings(
 class SCDataset(Dataset):
     def __init__(
         self,
-        datafile='./cpa_binaries/datasets/Norman2019_raw.h5ad',
+        datafile=None,
         perturb_type='single',
         perturb_targets=None,
         embedding_h5ad=None,
@@ -77,9 +77,9 @@ class SCDataset(Dataset):
     ):
         super(Dataset, self).__init__()
         assert perturb_type in ['single', 'double', 'both'], 'perturb_type not supported!'
-        self.datafile = datafile
+        self.datafile = str(datafile or project_config.SCDATA)
 
-        adata = sc.read_h5ad(datafile)
+        adata = sc.read_h5ad(self.datafile)
         self.embedding_h5ad = embedding_h5ad
         self.embedding_obsm_key = embedding_obsm_key
         self.embedding_align_mode = embedding_align_mode
@@ -178,43 +178,6 @@ class SCDataset(Dataset):
         return state
 
 
-# read simulation dataset
-class SimuDataset(Dataset):
-    def __init__(self, datafile='/home/jzhang/discrepancy_vae/identifiable_causal_vae/data/simulation/data_1.pkl', perturb_type='single', perturb_targets=None):
-        super(Dataset, self).__init__()
-        assert perturb_type in ['single', 'double'], 'perturb_type not supported!'
-
-        with open(datafile, 'rb') as f:
-            dataset = pickle.load(f)
-
-        if perturb_targets is None:
-            ptb_targets = dataset['ptb_targets']
-        else:
-            ptb_targets = perturb_targets
-        self.ptb_targets = ptb_targets
-
-        
-        ptb_data = dataset[perturb_type]
-        self.ctrl_samples = ptb_data['X']
-        self.ptb_samples = ptb_data['Xc']
-        self.ptb_names = np.array(ptb_data['ptbs'])
-        self.ptb_ids = map_ptb_features(ptb_targets, ptb_data['ptbs'])
-        del ptb_data 
-
-        self.nonlinear = dataset['nonlinear']
-        del dataset
-
-    def __getitem__(self, item):
-        x = torch.from_numpy(self.ctrl_samples[item].flatten()).double()
-        y = torch.from_numpy(self.ptb_samples[item].flatten()).double()
-        c = torch.from_numpy(self.ptb_ids[item]).double()
-        return x, y, c
-    
-    def __len__(self):
-        return self.ptb_samples.shape[0]
-
-
-
 def map_ptb_features(all_ptb_targets, ptb_ids):
     ptb_features = []
     for id in ptb_ids:
@@ -222,6 +185,3 @@ def map_ptb_features(all_ptb_targets, ptb_ids):
         feature[[all_ptb_targets.index(i) for i in id.split(',')]] = 1
         ptb_features.append(feature)
     return np.vstack(ptb_features)
-
-
-

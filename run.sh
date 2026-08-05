@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# Template
+# Main Norman GraCE-VAE experiment
 
 DEVICE="cuda:0"
 MODEL="cmvaegnn"
@@ -16,7 +16,7 @@ GRADCLIP=True
 
 for seed in 1 2 3 4 5 6 7 8 9 10
 do
-  echo "Running ${MODEL} mode ${MODE} with external embeddings for seed ${seed}"
+  echo "Running ${MODEL} mode ${MODE} for seed ${seed}"
 
   python -W ignore src/run.py \
     --device "${DEVICE}" \
