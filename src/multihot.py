@@ -5,8 +5,12 @@ import scanpy as sc
 sc.settings.verbosity = 3
 sc.settings.set_figure_params(dpi=80, facecolor='white', frameon=False)
 from edgeindex import getedge_index_GP,getedge_index_all_pathway
+
+import project_config
+
+
 device='cuda:0'
-adata = sc.read_h5ad('./cpa_binaries/datasets/Norman2019_raw.h5ad')
+adata = sc.read_h5ad(project_config.SCDATA)
 genes_A=list(adata.var.gene_symbols)
 edgeindex=getedge_index_all_pathway(device,genes_A)
 #edgeindex=getedge_index_all(device,genes_A)

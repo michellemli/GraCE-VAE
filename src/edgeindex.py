@@ -44,7 +44,7 @@ def build_gene_union_graph(device, genes_X, ptb_targets):
 
 
 def build_pathway_dag_components(device, genes_A, ptb_targets=None, p_dim=None):
-    gmt_file_path = './ReactomePathways.gmt'
+    gmt_file_path = '../networks/ReactomePathways.gmt'
     gmt_data = read_gmt(gmt_file_path)
 
     df_gene_pathway = pd.DataFrame(
@@ -53,7 +53,7 @@ def build_pathway_dag_components(device, genes_A, ptb_targets=None, p_dim=None):
     )
 
     raw_pathway_names = df_gene_pathway["Pathway"].drop_duplicates().tolist()
-    file_path = './ReactomePathwaysRelation.txt'
+    file_path = '../networks/ReactomePathwaysRelation.txt'
     df_pathway_relationship = pd.read_csv(file_path, sep='\t', header=None, names=['Pathway1', 'Pathway2'])
 
     adj = {name: [] for name in raw_pathway_names}
@@ -251,7 +251,7 @@ def allconnected_index_GG(device, genes_A):
 
 
 def getedge_index_GP(device,genes_A):
-    gmt_file_path = './ReactomePathways.gmt'
+    gmt_file_path = '../networks/ReactomePathways.gmt'
     gmt_data = read_gmt(gmt_file_path)
 
 
@@ -297,7 +297,7 @@ def getedge_index_GP(device,genes_A):
 
 
 def getedge_index_GGGP(device,genes_A):
-    gmt_file_path = './ReactomePathways.gmt'
+    gmt_file_path = '../networks/ReactomePathways.gmt'
     gmt_data = read_gmt(gmt_file_path)
 
 
@@ -348,7 +348,7 @@ def getedge_index_GGGP(device,genes_A):
 
 
 def getedge_index_all(device,genes_A):
-    gmt_file_path = './ReactomePathways.gmt'
+    gmt_file_path = '../networks/ReactomePathways.gmt'
     gmt_data = read_gmt(gmt_file_path)
 
 
@@ -381,7 +381,7 @@ def getedge_index_all(device,genes_A):
              pathway_idx = pathway_to_index[pathway]
              adj_matrix[gene_idx, pathway_idx] = 1
              adj_matrix[pathway_idx, gene_idx] = 1  
-    file_path='./ReactomePathwaysRelation.txt'
+    file_path='../networks/ReactomePathwaysRelation.txt'
     df_pathway_relationship=pd.read_csv(file_path, sep='\t', header=None,names=['Pathway1', 'Pathway2'])
     for _, row in df_pathway_relationship.iterrows():
         pathway1, pathway2 = row['Pathway1'], row['Pathway2']
@@ -418,7 +418,7 @@ def getedge_index_all(device,genes_A):
 
 
 def getedge_index_all_pathway(device,genes_A):
-    gmt_file_path = './ReactomePathways.gmt'
+    gmt_file_path = '../networks/ReactomePathways.gmt'
     gmt_data = read_gmt(gmt_file_path)
 
 
@@ -450,7 +450,7 @@ def getedge_index_all_pathway(device,genes_A):
              pathway_idx = pathway_to_index[pathway]
              adj_matrix[gene_idx, pathway_idx] = 1
              adj_matrix[pathway_idx, gene_idx] = 1  
-    file_path='./ReactomePathwaysRelation.txt'
+    file_path='../networks/ReactomePathwaysRelation.txt'
     df_pathway_relationship=pd.read_csv(file_path, sep='\t', header=None,names=['Pathway1', 'Pathway2'])
     for _, row in df_pathway_relationship.iterrows():
         pathway1, pathway2 = row['Pathway1'], row['Pathway2']

@@ -7,6 +7,8 @@ from utils import get_data
 from dataset import SCDataset
 import scanpy as sc
 
+import project_config 
+
 
 def _get_batch_embedding(batch):
 	if len(batch) > 3:
@@ -16,7 +18,7 @@ def _get_batch_embedding(batch):
 
 def evaluate_generated_samples(model, dataloader, device, temp, modelnumber,numint=1, mode='cmvae', randomedge=False, halfmixededge=False, seed=42):
 	model = model.to(device)
-	adata = sc.read_h5ad('./cpa_binaries/datasets/Norman2019_raw.h5ad')
+	adata = sc.read_h5ad(project_config.SCDATA)
 	al=list(adata.var.gene_symbols)
 	if halfmixededge and mode in ['cmvaegnn', 'cgvae']:
 		edgeindex=mixed_half_correct_half_random_index_all_pathway(device,al,seed=seed)

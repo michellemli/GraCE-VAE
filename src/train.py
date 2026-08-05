@@ -15,6 +15,8 @@ from sklearn.metrics import r2_score
 from inference import *
 from utils import SCDATA_sampler, MMD_loss, laplacian_smoothness
 
+import project_config
+
 
 def _get_batch_embedding(batch):
     if len(batch) > 3:
@@ -148,7 +150,7 @@ dataloader,val_dataloader,ptb_targets,
     torch.save(last_model, os.path.join(savedir, 'last_model.pt'))
     print("model saved!")
     loss_fn = MMD_loss(fix_sigma=1000, kernel_num=10).cuda()
-    adata=sc.read_h5ad('./cpa_binaries/datasets/Norman2019_raw.h5ad')
+    adata=sc.read_h5ad(project_config.SCDATA)
     cmvae.eval()
     
     print("start hyper parameter finetune on the validation  data-set")
@@ -477,7 +479,7 @@ def train_GNN(
     if log:
         wandb.init(project='cmvae', name=savedir.split('/')[-1])  
 
-    adata = sc.read_h5ad('./cpa_binaries/datasets/Norman2019_raw.h5ad')
+    adata = sc.read_h5ad(project_config.SCDATA)
     genes_A = list(adata.var.gene_symbols)
 
     if remove:
@@ -490,7 +492,7 @@ def train_GNN(
             mode=mode
         ) 
     elif graphencoder:
-        adata = sc.read_h5ad('./cpa_binaries/datasets/Norman2019_raw.h5ad')
+        adata = sc.read_h5ad(project_config.SCDATA)
         genes_X = list(adata.var.gene_symbols)  
         genes_all, interv_edge_index, ptb_to_node = build_gene_union_graph(
             device=device,
@@ -713,7 +715,7 @@ def train_GNN(
             #torch.save(best_model, os.path.join(savedir, 'best_model.pt'))
     # Final validation loss calculation
     loss_fn = MMD_loss(fix_sigma=1000, kernel_num=10).cuda()
-    adata=sc.read_h5ad('./cpa_binaries/datasets/Norman2019_raw.h5ad')
+    adata=sc.read_h5ad(project_config.SCDATA)
     if graphencoder and (interv_encoder_type in ["v2_dropedge_distill", "v1_trivalue_distill"]):
         set_distill_mode(cmvae, "student")
     cmvae.eval()
@@ -928,7 +930,7 @@ def train_onehot(
             #torch.save(best_model, os.path.join(savedir, 'best_model.pt'))
     # Final validation loss calculation
     loss_fn = MMD_loss(fix_sigma=1000, kernel_num=10).cuda()
-    adata=sc.read_h5ad('./cpa_binaries/datasets/Norman2019_raw.h5ad')
+    adata=sc.read_h5ad(project_config.SCDATA)
     
     cmvae.eval()
     
@@ -1038,7 +1040,7 @@ def test_model(
 
     # Initialize the MMD loss function
     loss_fn = MMD_loss(fix_sigma=1000, kernel_num=10).cuda()
-    adata=sc.read_h5ad('./cpa_binaries/datasets/Norman2019_raw.h5ad')
+    adata=sc.read_h5ad(project_config.SCDATA)
     if hasattr(model, "graph_c_encoder") and hasattr(model.graph_c_encoder, "output_mode"):
         model.graph_c_encoder.output_mode = "student"
     model.eval()
