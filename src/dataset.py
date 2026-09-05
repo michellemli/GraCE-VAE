@@ -177,6 +177,11 @@ class SCDataset(Dataset):
         state['rand_ctrl_embeddings'] = None
         return state
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.__dict__.setdefault('embedding_h5ad', None)
+        self.__dict__.setdefault('rand_ctrl_embeddings', None)
+
 
 def map_ptb_features(all_ptb_targets, ptb_ids):
     ptb_features = []
